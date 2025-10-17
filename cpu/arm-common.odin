@@ -46,51 +46,51 @@ Flags :: bit_field u32 {
     N: bool       | 1,
 }
 
-bus_read8: proc(addr: u32) -> u8
+bus_read8: proc(addr: u32, width: u8 = 1) -> u8
 bus_read16: proc(addr: u32) -> u16
 bus_read32: proc(addr: u32) -> u32
-bus_write8: proc(addr: u32, value: u8)
+bus_write8: proc(addr: u32, value: u8, width: u8 = 1)
 bus_write16: proc(addr: u32, value: u16)
 bus_write32: proc(addr: u32, value: u32)
 bus_get16: proc(addr: u32) -> u16
 bus_get32: proc(addr: u32) -> u32
 
+@(private)
 halt := false
+@(private)
 stop := false
+@(private)
 regs: [18][15]u32
+@(private)
 pipeline: [3]u32
+@(private)
 PC: u32
+@(private)
 CPSR: Flags
+@(private)
 refetch: bool
 
-cpu_reset :: proc() {
-    halt = false
-    stop = false
-    regs = {}
-    pipeline = {}
-    PC = 0xFFFF0000
-    CPSR = Flags(0)
-    refetch = false
-    cpu_init()
-}
-
+@(private)
 cpu_init :: proc() {
     CPSR.Mode = Modes.M_SUPERVISOR
     cpu_refetch32()
 }
 
+@(private)
 cpu_refetch16 :: proc() {
     pipeline[0] = u32(bus_read16(PC & 0xFFFFFFFE))
     pipeline[1] = u32(bus_read16((PC + 2) & 0xFFFFFFFE))
     PC += 4
 }
 
+@(private)
 cpu_refetch32 :: proc() {
     pipeline[0] = bus_get32(PC)
     pipeline[1] = bus_get32(PC + 4)
     PC += 8
 }
 
+@(private)
 cpu_prefetch16 :: proc() {
     pipeline[2] = u32(bus_read16(PC))
     pipeline[0] = pipeline[1]
@@ -98,49 +98,14 @@ cpu_prefetch16 :: proc() {
     PC += 2
 }
 
+@(private)
 cpu_prefetch32 :: proc() {
     pipeline[2] = bus_get32(PC)
     pipeline[0] = pipeline[1]
     pipeline[1] = pipeline[2]
 }
 
-cpu_step :: proc() -> u32 {
-    cpu_exec_irq()
-
-    if(stop || halt) {
-        return 1
-    }
-
-    //Execute instruction
-    cycles: u32
-    if(CPSR.Thumb) {
-        cycles = cpu_exec_thumb(u16(pipeline[0]))
-    } else {
-        cycles = cpu_exec_arm(pipeline[0])
-    }
-    if(refetch) {
-        refetch = false
-        if(CPSR.Thumb) {
-            cpu_refetch16()
-        } else {
-            cpu_refetch32()
-        }
-    }
-    return cycles
-}
-
-cpu_stop :: proc() {
-    stop = true
-}
-
-cpu_halt :: proc() {
-    halt = true
-}
-
-cpu_get_stop :: proc() -> bool {
-    return stop
-}
-
+@(private)
 cpu_reg_get :: proc(reg: Regs) -> u32 {
     switch(reg) {
     case Regs.SPSR:
@@ -176,6 +141,7 @@ cpu_reg_get :: proc(reg: Regs) -> u32 {
     return 0
 }
 
+@(private)
 cpu_reg_set :: proc(reg: Regs, value: u32) {
     switch(reg) {
     case Regs.SPSR:
@@ -216,6 +182,7 @@ cpu_reg_set :: proc(reg: Regs, value: u32) {
     }
 }
 
+@(private)
 cpu_reg_raw :: proc(reg: Regs, mode: Modes) -> u32 {
     if(reg == Regs.PC) {
         return PC
@@ -224,6 +191,7 @@ cpu_reg_raw :: proc(reg: Regs, mode: Modes) -> u32 {
     }
 }
 
+@(private)
 cpu_exec_irq :: proc() {
     //Handle interrupts
     if(utils_bit_get16(bus_get16(IO_IME), 0) && !CPSR.IRQ) { //IEs enabled
@@ -246,6 +214,7 @@ cpu_exec_irq :: proc() {
     }
 }
 
+@(private)
 cpu_mul_mla :: proc(opcode: u32) -> u32 {
     //TODO: Calculate proper timings
     A := utils_bit_get32(opcode, 21)
@@ -273,6 +242,7 @@ cpu_mul_mla :: proc(opcode: u32) -> u32 {
     return 2
 }
 
+@(private)
 cpu_mull_mlal :: proc(opcode: u32) -> u32 {
     //TODO: Calculate proper timings
     Op := opcode & 0x600000
@@ -340,6 +310,7 @@ cpu_mull_mlal :: proc(opcode: u32) -> u32 {
     return 3
 }
 
+@(private)
 cpu_hw_transfer :: proc(opcode: u32) -> u32 {
     P := utils_bit_get32(opcode, 24)
     U := utils_bit_get32(opcode, 23)
@@ -446,6 +417,7 @@ cpu_hw_transfer :: proc(opcode: u32) -> u32 {
     return cycles
 }
 
+@(private)
 cpu_swap :: proc(opcode: u32) -> u32 {
     B := utils_bit_get32(opcode, 22)
     Rn := Regs((opcode & 0xF0000) >> 16)
@@ -468,6 +440,7 @@ cpu_swap :: proc(opcode: u32) -> u32 {
     return 3
 }
 
+@(private)
 cpu_clz :: proc(opcode: u32) -> u32 {
     Rd := Regs((opcode & 0xF000) >> 12)
     Rm := Regs(opcode & 0xF)
@@ -477,6 +450,7 @@ cpu_clz :: proc(opcode: u32) -> u32 {
     return 1
 }
 
+@(private)
 cpu_qaddsub :: proc(opcode: u32) -> u32 {
     Rn := Regs((opcode & 0xF0000) >> 16)
     Rd := Regs((opcode & 0xF000) >> 12)
@@ -520,6 +494,7 @@ cpu_qaddsub :: proc(opcode: u32) -> u32 {
     return 1
 }
 
+@(private)
 cpu_arm_alu :: proc(opcode: u32, I: bool) -> u32 {
     op := opcode & 0x1E00000
     S := utils_bit_get32(opcode, 20)
@@ -714,6 +689,7 @@ cpu_arm_alu :: proc(opcode: u32, I: bool) -> u32 {
     return (1 + p) + r + p
 }
 
+@(private)
 cpu_msr_mrs :: proc(opcode: u32, op2: u32) {
     spsr := utils_bit_get32(opcode, 22)
     reg := spsr ? cpu_reg_get(Regs.SPSR) : u32(CPSR)
@@ -756,6 +732,7 @@ cpu_msr_mrs :: proc(opcode: u32, op2: u32) {
     }
 }
 
+@(private)
 cpu_ldr :: proc(opcode: u32, I: bool) -> u32 {
     P := i64(utils_bit_get32(opcode, 24))
     U := utils_bit_get32(opcode, 23)
@@ -820,6 +797,7 @@ cpu_ldr :: proc(opcode: u32, I: bool) -> u32 {
     return 3
 }
 
+@(private)
 cpu_ldm_stm :: proc(opcode: u32) -> u32 {
     P := utils_bit_get32(opcode, 24)
     U := utils_bit_get32(opcode, 23)
@@ -904,6 +882,7 @@ cpu_ldm_stm :: proc(opcode: u32) -> u32 {
     return cycles
 }
 
+@(private)
 cpu_b_bl :: proc(opcode: u32) -> u32 {
     offset := (opcode & 0xFFFFFF) << 2
     offset = utils_sign_extend32(offset, 26)
@@ -918,6 +897,7 @@ cpu_b_bl :: proc(opcode: u32) -> u32 {
     return 3
 }
 
+@(private)
 cpu_blx :: proc(opcode: u32) -> u32 {
     offset := (opcode & 0xFFFFFF) << 2
     offset = utils_sign_extend32(offset, 26)
@@ -929,6 +909,7 @@ cpu_blx :: proc(opcode: u32) -> u32 {
     return 3
 }
 
+@(private)
 cpu_unknown_irq :: proc() {
     cpsr := CPSR
     CPSR.Mode = Modes.M_UNDEFINED
@@ -939,16 +920,19 @@ cpu_unknown_irq :: proc() {
     CPSR.IRQ = true     //Disable interrupts
 }
 
+@(private)
 cpu_ldc_stc :: proc(opcode: u32) -> u32 {
     cpu_unknown_irq()
     return 1
 }
 
+@(private)
 cpu_cdp :: proc(opcode: u32) -> u32 {
     cpu_unknown_irq()
     return 3
 }
 
+@(private)
 cpu_swi :: proc() -> u32 {
     regs[17][3] = u32(CPSR)
     CPSR.Mode = Modes.M_SUPERVISOR
@@ -959,6 +943,7 @@ cpu_swi :: proc() -> u32 {
     return 3
 }
 
+@(private)
 cpu_exec_thumb :: proc(opcode: u16) -> u32 {
     cpu_prefetch16()
     id := opcode & 0xF800
@@ -1044,6 +1029,7 @@ cpu_exec_thumb :: proc(opcode: u16) -> u32 {
     return retval
 }
 
+@(private)
 cpu_shift :: proc(opcode: u16) -> u32 {
     op := opcode & 0x1800
     imm := u32((opcode & 0x07C0) >> 6)
@@ -1081,6 +1067,7 @@ cpu_shift :: proc(opcode: u16) -> u32 {
     return 1
 }
 
+@(private)
 cpu_add_sub :: proc(opcode: u16) -> u32 {
     Op := (opcode & 0x0600) >> 9
     Rn := u32((opcode & 0x01C0) >> 6)
@@ -1122,6 +1109,7 @@ cpu_add_sub :: proc(opcode: u16) -> u32 {
     return 1
 }
 
+@(private)
 cpu_mcas_imm :: proc(opcode: u16) -> u32 {
     op := opcode & 0x1800
     Rd := Regs((opcode & 0x0700) >> 8)
@@ -1160,6 +1148,7 @@ cpu_mcas_imm :: proc(opcode: u16) -> u32 {
     return 1
 }
 
+@(private)
 cpu_hi_reg :: proc(opcode: u16) -> u32 {
     Op := (opcode & 0x0300) >> 8
     H1 := Regs(u8(utils_bit_get16(opcode, 7)) * 8)
@@ -1200,6 +1189,7 @@ cpu_hi_reg :: proc(opcode: u16) -> u32 {
     return cycles
 }
 
+@(private)
 cpu_alu :: proc(opcode: u16) -> u32 {
     Op := (opcode & 0x03C0) >> 6
     Rs := Regs((opcode & 0x0038) >> 3)
@@ -1307,6 +1297,7 @@ cpu_alu :: proc(opcode: u16) -> u32 {
     return 1
 }
 
+@(private)
 cpu_ld_pc :: proc(opcode: u16) -> u32 {
     Rd := Regs((opcode & 0x0700) >> 8)
     imm := u32((opcode & 0x00FF) << 2)
@@ -1315,6 +1306,7 @@ cpu_ld_pc :: proc(opcode: u16) -> u32 {
     return 3
 }
 
+@(private)
 cpu_ls_ext :: proc(opcode: u16) -> u32 {
     Op := opcode & 0x0C00
     Ro := Regs((opcode & 0x01C0) >> 6)
@@ -1352,6 +1344,7 @@ cpu_ls_ext :: proc(opcode: u16) -> u32 {
     return cycles
 }
 
+@(private)
 cpu_ls_reg :: proc(opcode: u16) -> u32 {
     Op := opcode & 0x0C00
     Ro := Regs((opcode & 0x01C0) >> 6)
@@ -1382,6 +1375,7 @@ cpu_ls_reg :: proc(opcode: u16) -> u32 {
     return cycles
 }
 
+@(private)
 cpu_ls_imm :: proc(opcode: u16) -> u32 {
     Op := opcode & 0x1800
     imm := u32((opcode & 0x07C0) >> 6)
@@ -1412,6 +1406,7 @@ cpu_ls_imm :: proc(opcode: u16) -> u32 {
     return cycles
 }
 
+@(private)
 cpu_ls_hw :: proc(opcode: u16) -> u32 {
     L := utils_bit_get16(opcode, 11)
     imm := u32(((opcode & 0x07C0) >> 6) << 1)
@@ -1434,6 +1429,7 @@ cpu_ls_hw :: proc(opcode: u16) -> u32 {
     return cycles
 }
 
+@(private)
 cpu_ls_sp :: proc(opcode: u16) -> u32 {
     L := utils_bit_get16(opcode, 11)
     Rd := Regs((opcode & 0x0700) >> 8)
@@ -1453,6 +1449,7 @@ cpu_ls_sp :: proc(opcode: u16) -> u32 {
     return cycles
 }
 
+@(private)
 cpu_ld :: proc(opcode: u16) -> u32 {
     sp := utils_bit_get16(opcode, 11)
     Rd := Regs((opcode & 0x0700) >> 8)
@@ -1474,6 +1471,7 @@ cpu_ld :: proc(opcode: u16) -> u32 {
     return 1
 }
 
+@(private)
 cpu_push_pop :: proc(opcode: u16) -> u32 {
     R := utils_bit_get16(opcode, 8)
     L := utils_bit_get16(opcode, 11)
@@ -1526,6 +1524,7 @@ cpu_push_pop :: proc(opcode: u16) -> u32 {
     return cycles
 }
 
+@(private)
 cpu_sp_ofs :: proc(opcode: u16) -> u32 {
     S := utils_bit_get16(opcode, 7)
     offset := i32((opcode & 0x007F) << 2)
@@ -1536,6 +1535,7 @@ cpu_sp_ofs :: proc(opcode: u16) -> u32 {
     return 1
 }
 
+@(private)
 cpu_ls_mp :: proc(opcode: u16) -> u32 {
     L := utils_bit_get16(opcode, 11)
     Rb := Regs((opcode & 0x0700) >> 8)
@@ -1575,6 +1575,7 @@ cpu_ls_mp :: proc(opcode: u16) -> u32 {
     return cycles
 }
 
+@(private)
 cpu_b_cond :: proc(opcode: u16) -> u32{
     Op := (opcode & 0x0F00) >> 8
     offset := u32((opcode & 0x00FF) << 1)
@@ -1635,6 +1636,7 @@ cpu_b_cond :: proc(opcode: u16) -> u32{
     return 3
 }
 
+@(private)
 cpu_b_uncond :: proc(opcode: u16) -> u32 {
     offset := u32((opcode & 0x7FF) << 1)
     offset = utils_sign_extend32(offset, 12)
@@ -1642,6 +1644,7 @@ cpu_b_uncond :: proc(opcode: u16) -> u32 {
     return 3
 }
 
+@(private)
 cpu_bl :: proc(opcode: u16) -> u32 {
     if(!utils_bit_get16(opcode, 11)) {
         imm := i16(opcode & 0x7FF) << 5
@@ -1657,6 +1660,7 @@ cpu_bl :: proc(opcode: u16) -> u32 {
     }
 }
 
+@(private)
 cpu_setZNArmAlu :: proc(Rd: Regs, res: u32) {
     if(Rd == Regs.PC) {
         mode := CPSR.Mode
@@ -1672,6 +1676,7 @@ cpu_setZNArmAlu :: proc(Rd: Regs, res: u32) {
     }
 }
 
+@(private)
 cpu_reg_shift :: proc(opcode: u32, logic_carry: ^bool) -> u32 {
     shift_type := opcode & 0x60
     shift_reg := utils_bit_get32(opcode, 4)
@@ -1711,6 +1716,7 @@ cpu_reg_shift :: proc(opcode: u32, logic_carry: ^bool) -> u32 {
     return res
 }
 
+@(private)
 cpu_lsl :: proc(shift: u32, value: u32, logic_carry: ^bool) -> u32 {
     res: u32
 
@@ -1723,6 +1729,7 @@ cpu_lsl :: proc(shift: u32, value: u32, logic_carry: ^bool) -> u32 {
     return res
 }
 
+@(private)
 cpu_lsr :: proc(shift: u32, value: u32, logic_carry: ^bool) -> u32 {
     res: u32
 
@@ -1740,6 +1747,7 @@ cpu_lsr :: proc(shift: u32, value: u32, logic_carry: ^bool) -> u32 {
     return res
 }
 
+@(private)
 cpu_asr :: proc(shift: u32, value: u32, logic_carry: ^bool) -> u32 {
     res: u32
 
@@ -1764,6 +1772,7 @@ cpu_asr :: proc(shift: u32, value: u32, logic_carry: ^bool) -> u32 {
     return res
 }
 
+@(private)
 cpu_ror :: proc(shift: u32, value: u32, logic_carry: ^bool) -> u32 {
     res: u32
 
@@ -1788,28 +1797,34 @@ cpu_ror :: proc(shift: u32, value: u32, logic_carry: ^bool) -> u32 {
     return res
 }
 
+@(private)
 cpu_ror32 :: proc(number: u32, count: u32) -> u32 {
     lower := number >> count
     upper := number << (32 - count)
     return lower | upper
 }
 
+@(private)
 utils_bit_get16 :: proc(value: u16, bit: u8) -> bool {
     return bool((value >> bit) & 1)
 }
 
+@(private)
 utils_bit_get32 :: proc(value: u32, bit: u8) -> bool {
     return bool((value >> bit) & 1)
 }
 
+@(private)
 utils_bit_get64 :: proc(value: u64, bit: u8) -> bool {
     return bool((value >> bit) & 1)
 }
 
+@(private)
 utils_bit_clear32 :: proc(value: u32, bit: u8) -> u32 {
     return value & ~(1 << bit)
 }
 
+@(private)
 utils_sign_extend32 :: proc(data: u32, bits: u32) -> u32 {
     m := u32(1) << (bits - 1)
     return (data ~ m) - m

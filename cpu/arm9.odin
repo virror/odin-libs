@@ -2,6 +2,90 @@ package cpu
 
 import "core:fmt"
 
+IO_IME :u32: 0x4000208
+IO_IE :u32: 0x4000210
+IO_IF :u32: 0x4000214
+
+cp15_read: proc(CRn: u32, CRm: u32, CP: u32) -> u32
+cp15_write: proc(CRn: u32, CRm: u32, CP: u32, value: u32)
+
+arm9_reset :: proc(pc: u32) {
+    halt = false
+    stop = false
+    regs = {}
+    pipeline = {}
+    PC = pc
+    CPSR = Flags(0)
+    refetch = false
+    cpu_init()
+}
+
+arm9_step :: proc() -> u32 {
+    cpu_exec_irq()
+
+    if(stop || halt) {
+        return 1
+    }
+
+    cycles: u32
+    if(CPSR.Thumb) {
+        cycles = cpu_exec_thumb(u16(pipeline[0]))
+    } else {
+        cycles = cpu_exec_arm(pipeline[0])
+    }
+    if(refetch) {
+        refetch = false
+        if(CPSR.Thumb) {
+            cpu_refetch16()
+        } else {
+            cpu_refetch32()
+        }
+    }
+    return cycles
+}
+
+arm9_stop :: proc() {
+    stop = true
+}
+
+arm9_halt :: proc() {
+    halt = true
+}
+
+arm9_get_stop :: proc() -> bool {
+    return stop
+}
+
+arm9_reg_get :: proc(reg: Regs) -> u32 {
+    return cpu_reg_get(reg)
+}
+
+arm9_reg_raw :: proc(reg: Regs, mode: Modes) -> u32 {
+    return regs[reg][u16(mode) - 16]
+}
+
+arm9_get_cpsr :: proc() -> Flags {
+    return CPSR
+}
+
+arm9_get_instruction :: proc() -> u32 {
+    if(CPSR.Thumb) {
+        return u32(pipeline[0] & 0xFFFF)
+    } else {
+        return pipeline[0]
+    }
+}
+
+arm9_init_no_bios :: proc() {
+    cpu_reg_set(Regs.R0, 0x00000CA5)
+    CPSR = Flags(0x1F)
+    regs[Regs.SP][u16(Modes.M_SUPERVISOR) - 16] = 0x03007FE0
+    regs[Regs.SP][u16(Modes.M_IRQ) - 16] = 0x03007FA0
+    cpu_reg_set(Regs.SP, 0x03007F00)
+    cpu_reg_set(Regs.LR, 0x08000000)
+}
+
+@(private="file")
 cpu_exec_arm :: proc(opcode: u32) -> u32 {
     cpu_prefetch32()
     //4 uppermost bits are conditional, if they match, execute, otherwise return

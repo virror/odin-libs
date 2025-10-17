@@ -2,6 +2,79 @@ package cpu
 
 import "core:fmt"
 
+arm7_reset :: proc(pc: u32) {
+    halt = false
+    stop = false
+    regs = {}
+    pipeline = {}
+    PC = pc
+    CPSR = Flags(0)
+    refetch = false
+    cpu_init()
+}
+
+arm7_step :: proc() -> u32 {
+    cpu_exec_irq()
+
+    if(stop || halt) {
+        return 1
+    }
+
+    cycles: u32
+    if(CPSR.Thumb) {
+        cycles = cpu_exec_thumb(u16(pipeline[0]))
+    } else {
+        cycles = cpu_exec_arm(pipeline[0])
+    }
+    if(refetch) {
+        refetch = false
+        if(CPSR.Thumb) {
+            cpu_refetch16()
+        } else {
+            cpu_refetch32()
+        }
+    }
+    return cycles
+}
+
+arm7_stop :: proc() {
+    stop = true
+}
+
+arm7_halt :: proc() {
+    halt = true
+}
+
+arm7_get_stop :: proc() -> bool {
+    return stop
+}
+
+arm7_reg_get :: proc(reg: Regs) -> u32 {
+    return cpu_reg_get(reg)
+}
+
+arm7_get_cpsr :: proc() -> Flags {
+    return CPSR
+}
+
+arm7_get_instruction :: proc() -> u32 {
+    if(CPSR.Thumb) {
+        return u32(pipeline[0] & 0xFFFF)
+    } else {
+        return pipeline[0]
+    }
+}
+
+arm7_init_no_bios :: proc() {
+    cpu_reg_set(Regs.R0, 0x00000CA5)
+    CPSR = Flags(0x1F)
+    regs[Regs.SP][u16(Modes.M_SUPERVISOR) - 16] = 0x03007FE0
+    regs[Regs.SP][u16(Modes.M_IRQ) - 16] = 0x03007FA0
+    cpu_reg_set(Regs.SP, 0x03007F00)
+    cpu_reg_set(Regs.LR, 0x08000000)
+}
+
+@(private="file")
 cpu_exec_arm :: proc(opcode: u32) -> u32 {
     cpu_prefetch32()
     //4 uppermost bits are conditional, if they match, execute, otherwise return
