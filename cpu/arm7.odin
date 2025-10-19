@@ -57,11 +57,11 @@ arm7_get_cpsr :: proc() -> Flags {
     return CPSR
 }
 
-arm7_get_instruction :: proc() -> u32 {
+arm7_get_instruction :: proc(idx: u32) -> u32 {
     if(CPSR.Thumb) {
-        return u32(pipeline[0] & 0xFFFF)
+        return u32(pipeline[idx] & 0xFFFF)
     } else {
-        return pipeline[0]
+        return pipeline[idx]
     }
 }
 

@@ -1,6 +1,7 @@
 package cpu
 
 import "core:fmt"
+import "base:intrinsics"
 
 IO_IME :u32: 0x4000208
 IO_IE :u32: 0x4000210
@@ -68,11 +69,11 @@ arm9_get_cpsr :: proc() -> Flags {
     return CPSR
 }
 
-arm9_get_instruction :: proc() -> u32 {
+arm9_get_instruction :: proc(idx: u32) -> u32 {
     if(CPSR.Thumb) {
-        return u32(pipeline[0] & 0xFFFF)
+        return u32(pipeline[idx] & 0xFFFF)
     } else {
-        return pipeline[0]
+        return pipeline[idx]
     }
 }
 
@@ -188,12 +189,15 @@ cpu_exec_arm :: proc(opcode: u32) -> u32 {
             retval = cpu_swap(opcode)
         } else if(((opcode & 0xF0) == 0xB0) || ((opcode & 0xD0) == 0xD0)) {
             retval = cpu_hw_transfer(opcode)
+        } else if((opcode & 0xFFF0FF0) == 0x16F0F10) {
+            retval = cpu_clz(opcode)
         } else { //ALU reg
             retval = cpu_arm_alu(opcode, false)
         }
         break
     }
     case 0x1000000:
+        fmt.print(opcode)
         if((opcode & 0xFFF0FF0) == 0x16F0F10) {
             retval = cpu_clz(opcode)
         } else {
@@ -278,4 +282,59 @@ cpu_mrc_mcr :: proc(opcode: u32) -> u32 {
         
     }
     return 3
+}
+
+@(private)
+cpu_clz :: proc(opcode: u32) -> u32 {
+    fmt.println("CLZ")
+    Rd := Regs((opcode & 0xF000) >> 12)
+    Rm := Regs(opcode & 0xF)
+
+    count := intrinsics.count_leading_zeros(cpu_reg_get(Rm))
+    cpu_reg_set(Rd, count)
+    return 1
+}
+
+@(private)
+cpu_qaddsub :: proc(opcode: u32) -> u32 {
+    Rn := Regs((opcode & 0xF0000) >> 16)
+    Rd := Regs((opcode & 0xF000) >> 12)
+    Rm := Regs(opcode & 0xF)
+    op := (opcode >> 20) & 0xF
+    a := i64(i32(cpu_reg_get(Rn)))
+    b := i64(i32(cpu_reg_get(Rm)))
+
+    if(op == 0x2 || op == 0x6) {
+        b = -b
+    }
+
+    qflag := CPSR.Q
+
+    if(op == 0x4 || op == 0x6) {
+        doubled := a * 2
+        if(doubled > i64(0x7FFFFFFF)) {
+            a = i64(0x7FFFFFFF)
+            qflag = true
+        } else if(doubled < i64(-2147483648)) {
+            a = i64(-2147483648)
+            qflag = true
+        } else {
+            a = doubled
+        }
+    }
+
+    sum := a + b
+
+    if(sum > i64(0x7FFFFFFF)) {
+        cpu_reg_set(Rd, u32(0x7FFFFFFF))
+        qflag = true
+    } else if(sum < i64(-2147483648)) {
+        cpu_reg_set(Rd, u32(0x80000000))
+        qflag = true
+    } else {
+        cpu_reg_set(Rd, u32(i32(sum)))
+    }
+
+    CPSR.Q = qflag
+    return 1
 }
