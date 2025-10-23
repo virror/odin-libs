@@ -890,92 +890,6 @@ cpu_swi :: proc() -> u32 {
 }
 
 @(private)
-cpu_exec_thumb :: proc(opcode: u16) -> u32 {
-    cpu_prefetch16()
-    id := opcode & 0xF800
-    retval :u32= 0
-
-    switch(id) {
-    case 0x0000, 0x0800, 0x1000:
-        retval = cpu_shift(opcode)
-        break
-    case 0x1800:
-        retval = cpu_add_sub(opcode)
-        break
-    case 0x2000, //Move, compare
-         0x2800, //add, substract
-         0x3000, //add, substract
-         0x3800: //add, substract
-        retval = cpu_mcas_imm(opcode)
-        break
-    case 0x4000:
-        if(utils_bit_get16(opcode, 10)) {
-            retval = cpu_hi_reg(opcode)
-        } else {
-            retval = cpu_alu(opcode)
-        }
-        break
-    case 0x4800:
-        retval = cpu_ld_pc(opcode)
-        break
-    case 0x5000,
-         0x5800:
-        if(utils_bit_get16(opcode, 9)) {
-            retval = cpu_ls_ext(opcode)
-        } else {
-            retval = cpu_ls_reg(opcode)
-        }
-        break
-    case 0x6000,
-         0x6800,
-         0x7000,
-         0x7800:
-        retval = cpu_ls_imm(opcode)
-        break
-    case 0x8000,
-         0x8800:
-        retval = cpu_ls_hw(opcode)
-        break
-    case 0x9000,
-         0x9800:
-        retval = cpu_ls_sp(opcode)
-        break
-    case 0xA000,
-         0xA800:
-        retval = cpu_ld(opcode)
-        break
-    case 0xB000,
-         0xB800:
-        if(utils_bit_get16(opcode, 10)) {
-            retval = cpu_push_pop(opcode)
-        } else {
-            retval = cpu_sp_ofs(opcode)
-        }
-        break
-    case 0xC000,
-         0xC800:
-        retval = cpu_ls_mp(opcode)
-        break
-    case 0xD000,
-         0xD800:
-        retval = cpu_b_cond(opcode)
-        break
-    case 0xE000:
-        retval = cpu_b_uncond(opcode)
-        break
-    case 0xF000,
-         0xF800:
-        retval = cpu_bl(opcode)
-        break
-    case:
-        fmt.print("Unimplemented thumb code: ")
-        fmt.println(opcode)
-        break
-    }
-    return retval
-}
-
-@(private)
 cpu_shift :: proc(opcode: u16) -> u32 {
     op := opcode & 0x1800
     imm := u32((opcode & 0x07C0) >> 6)
@@ -1092,47 +1006,6 @@ cpu_mcas_imm :: proc(opcode: u16) -> u32 {
     CPSR.Z = res == 0
     CPSR.N = bool(res >> 31)
     return 1
-}
-
-@(private)
-cpu_hi_reg :: proc(opcode: u16) -> u32 {
-    Op := (opcode & 0x0300) >> 8
-    H1 := Regs(u8(utils_bit_get16(opcode, 7)) * 8)
-    H2 := Regs(u8(utils_bit_get16(opcode, 6)) * 8)
-    Rs := Regs((opcode & 0x0038) >> 3)
-    Rd := Regs(opcode & 0x0007)
-    res: u32
-    cycles :u32= 1
-
-    switch(Op) {
-    case 0:
-        cpu_reg_set(Rd + H1, cpu_reg_get(Rd + H1) + cpu_reg_get(Rs + H2))
-        break
-    case 1: //CMP
-        RsReg := cpu_reg_get(Rs + H2)
-        RdReg := cpu_reg_get(Rd + H1)
-        res = RdReg - RsReg
-        CPSR.Z = res == 0
-        CPSR.N = bool(res >> 31)
-        CPSR.C = RdReg >= RsReg
-        CPSR.V = bool(((RdReg ~ RsReg) & (RdReg ~ res)) >> 31)
-        break
-    case 2: //MOV
-        cpu_reg_set(Rd + H1, cpu_reg_get(Rs + H2))
-        break
-    case 3: //BX
-        value := cpu_reg_get(Rs + H2)
-        thumb := utils_bit_get32(value, 0)
-        CPSR.Thumb = thumb
-        if(thumb) {
-            cpu_reg_set(Regs.PC, (value & 0xFFFFFFFE))
-        } else {
-            cpu_reg_set(Regs.PC, value)
-        }
-        cycles += 2
-        break
-    }
-    return cycles
 }
 
 @(private)
@@ -1588,22 +1461,6 @@ cpu_b_uncond :: proc(opcode: u16) -> u32 {
     offset = utils_sign_extend32(offset, 12)
     cpu_reg_set(Regs.PC, u32(i32(PC) + i32(offset) - 2))
     return 3
-}
-
-@(private)
-cpu_bl :: proc(opcode: u16) -> u32 {
-    if(!utils_bit_get16(opcode, 11)) {
-        imm := i16(opcode & 0x7FF) << 5
-        imm2 := u32(i32(PC) - 2 + i32(u32(i32(imm)) << 7))
-        cpu_reg_set(Regs.LR, imm2)
-        return 1
-    } else {
-        tmp_pc := PC
-        imm := u32(opcode & 0x7FF) << 1
-        cpu_reg_set(Regs.PC, cpu_reg_get(Regs.LR) + imm)
-        cpu_reg_set(Regs.LR, (tmp_pc | 1) - 4)
-        return 3
-    }
 }
 
 @(private)
