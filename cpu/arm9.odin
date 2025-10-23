@@ -177,22 +177,22 @@ cpu_exec_arm :: proc(opcode: u32) -> u32 {
     switch(id) {
     case 0x0000000:
     {
-        if((opcode & 0xFFFFFC0) == 0x12FFF00) {
+        if((opcode & 0xFFFFFD0) == 0x12FFF10) {
             retval = cpu_bx(opcode)
-        } else if((opcode & 0x10000F0) == 0x0000090) { //MUL, MLA
-            if(utils_bit_get32(opcode, 23)) { //MULL, MLAL
-                retval = cpu_mull_mlal(opcode)
-            } else {
-                retval = cpu_mul_mla(opcode)
-            }
-        } else if((opcode & 0x10000F0) == 0x1000090) {
-            retval = cpu_swap(opcode)
-        } else if(((opcode & 0xF0) == 0xB0) || ((opcode & 0xD0) == 0xD0)) {
-            retval = cpu_hw_transfer(opcode)
         } else if((opcode & 0xFFF0FF0) == 0x16F0F10) {
             retval = cpu_clz(opcode)
-        //} else if ((opcode & 0xF900FF0) == 0x1000050) {
-        //    retval = cpu_qaddsub(opcode)
+        } else if((opcode & 0xFB00FF0) == 0x1000090) {
+            retval = cpu_swap(opcode)
+        } else if((opcode & 0xF900FF0) == 0x1000050) {
+            retval = cpu_qaddsub(opcode)
+        } else if((opcode & 0xFC000F0) == 0x0000090) {
+            retval = cpu_mul_mla(opcode)
+        } else if((opcode & 0xF8000F0) == 0x0800090) {
+            retval = cpu_mull_mlal(opcode)
+        } else if((opcode & 0xF900090) == 0x1000080) {
+            retval = cpu_mulh(opcode)
+        } else if(((opcode & 0xF0) == 0xB0) || ((opcode & 0xD0) == 0xD0)) {
+            retval = cpu_hw_transfer(opcode)
         } else { //ALU reg
             retval = cpu_arm_alu(opcode, false)
         }
@@ -260,6 +260,115 @@ cpu_bx :: proc(opcode: u32) -> u32 {
 }
 
 @(private="file")
+cpu_mulh :: proc(opcode: u32) -> u32 {
+    PC += 4
+    return 1
+}
+
+@(private="file")
+cpu_hw_transfer :: proc(opcode: u32) -> u32 {
+    P := utils_bit_get32(opcode, 24)
+    U := utils_bit_get32(opcode, 23)
+    I := utils_bit_get32(opcode, 22)
+    W := true
+    if(P) {
+        W = utils_bit_get32(opcode, 21)
+    }
+    L := utils_bit_get32(opcode, 20)
+    Rn := Regs((opcode & 0xF0000) >> 16)
+    Rd := Regs((opcode & 0xF000) >> 12)
+    offs2 := (opcode & 0xF00) >> 4
+    op := opcode & 0x60
+    Rm := Regs(opcode & 0xF)
+    offset := i64(cpu_reg_get(Rm))
+    address := cpu_reg_get(Rn)
+    cycles: u32
+    data: u32
+
+    if(I) {
+        offset = i64(Rm) + i64(offs2)
+    }
+    if(!U) {
+        offset = -offset
+    }
+
+    address = u32(i64(address) + i64(P) * offset) //Pre increment
+    PC += 4
+    
+    if(L) {
+        switch(op) {
+        case 0x20: //LDRH
+            shift := address & 0x1
+            data = u32(bus_read16(address))
+            if(shift == 1) {
+                data = cpu_ror32(data, 8)
+            }
+            address = u32(i64(address) + (1 - i64(P)) * offset) //Post increment
+            if(W && !((Rn == Regs.PC) && (Rd == Regs.PC))) {
+                if(Rn == Regs.PC) {
+                    cpu_reg_set(Rn, address + 4)
+                } else {
+                    cpu_reg_set(Rn, address)
+                }
+        }
+            break
+        case 0x40: //LDRSB
+            data = u32(i32(i8(bus_read8(address))))
+            address = u32(i64(address) + (1 - i64(P)) * offset) //Post increment
+            if(W) {
+                if(Rn == Regs.PC) {// writeback fails. technically invalid here
+                    if(Rd != Regs.PC) {
+                        cpu_reg_set(Rn, address + 4)
+                    }
+                } else {
+                    cpu_reg_set(Rn, address)
+                }
+            }
+            break
+        case 0x60: //LDRSH
+            data = u32(i32(i16(bus_read16(address))))
+            shift := address & 0x1
+            if(shift == 1) {
+                data = u32(i32(i16(cpu_ror32(data, 8))))
+            }
+            address = u32(i64(address) + (1 - i64(P)) * offset) //Post increment
+            if(W) {
+                if(Rn == Regs.PC) {// writeback fails. technically invalid here
+                    if(Rd != Regs.PC) {
+                        cpu_reg_set(Rn, address + 4)
+                    }
+                } else {
+                    cpu_reg_set(Rn, address)
+                }
+            }
+            break
+        }
+        cpu_reg_set(Rd, data)
+        cycles = 3
+    } else {
+        switch(op) {
+        case 0x20: //STRH
+            value := cpu_reg_get(Rd)
+            bus_write16(address, u16(value))
+            cycles = 2
+            address = u32(i64(address) + (1 - i64(P)) * offset) //Post increment
+            if(W) {
+                if(Rn == Regs.PC) {
+                    cpu_reg_set(Rn, address + 4)
+                } else {
+                    cpu_reg_set(Rn, address)
+                }
+            }
+        case 0x40:
+            fmt.println("LDRD")
+        case 0x60:
+            fmt.println("STRD")
+        }
+    }
+    return cycles
+}
+
+@(private="file")
 cpu_mrc_mcr :: proc(opcode: u32) -> u32 {
     Op := utils_bit_get32(opcode, 20)
     CRn := (opcode & 0xF0000) >> 16
@@ -291,7 +400,6 @@ cpu_clz :: proc(opcode: u32) -> u32 {
 
 @(private="file")
 cpu_qaddsub :: proc(opcode: u32) -> u32 {
-    fmt.println("QADD/SUB")
     Rn := Regs((opcode & 0xF0000) >> 16)
     Rd := Regs((opcode & 0xF000) >> 12)
     Rm := Regs(opcode & 0xF)
@@ -299,10 +407,8 @@ cpu_qaddsub :: proc(opcode: u32) -> u32 {
     a := i64(i32(cpu_reg_get(Rn)))
     b := i64(i32(cpu_reg_get(Rm)))
 
-    if(op == 0x2 || op == 0x6) {
-        b = -b
-    }
     qflag := CPSR.Q
+    PC += 4
 
     if(op == 0x4 || op == 0x6) {
         doubled := a * 2
@@ -316,7 +422,13 @@ cpu_qaddsub :: proc(opcode: u32) -> u32 {
             a = doubled
         }
     }
-    sum := a + b
+
+    sum: i64
+    if(op == 0x2 || op == 0x6) {
+        sum = b - a
+    } else {
+        sum = b + a
+    }
 
     if(sum > i64(0x7FFFFFFF)) {
         cpu_reg_set(Rd, u32(0x7FFFFFFF))
