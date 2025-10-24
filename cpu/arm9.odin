@@ -261,8 +261,52 @@ cpu_bx :: proc(opcode: u32) -> u32 {
 
 @(private="file")
 cpu_mulh :: proc(opcode: u32) -> u32 {
+    Op := opcode & 0x600000
+    Rd := Regs((opcode & 0xF0000) >> 16)
+    Rn := Regs((opcode & 0xF000) >> 12)
+    Rs := Regs((opcode & 0xF00) >> 8)
+    y := utils_bit_get32(opcode, 6)
+    x := utils_bit_get32(opcode, 5)
+    Rm := Regs(opcode & 0xF)
+    HalfRm: i32
+    //res: u32
+    if(x) {
+        HalfRm = i32(cpu_reg_get(Rm) >> 16)
+    } else {
+        HalfRm = i32(cpu_reg_get(Rm) & 0xFFFF)
+    }
+    HalfRs: i32
+    if(y) {
+        HalfRs = i32(cpu_reg_get(Rs) >> 16)
+    } else {
+        HalfRs = i32(cpu_reg_get(Rs) & 0xFFFF)
+    }
     PC += 4
-    return 1
+
+    switch(Op) {
+    case 0x000000:  //SMLAxy
+        mul_res := u32(u16(i16(HalfRm) * i16(HalfRs)))
+        //res = u32(i32(mul_res) + i32(cpu_reg_get(Rn)))
+        res2, flag := intrinsics.overflow_add(i32(mul_res), i32(cpu_reg_get(Rn)))
+
+        fmt.println(i16(HalfRm))
+        fmt.println(i16(HalfRs))
+        fmt.println(mul_res)
+        fmt.println(i32(cpu_reg_get(Rn)))
+        fmt.println(u32(u16(res2)))
+        fmt.println(flag)
+
+        cpu_reg_set(Rd, u32(u16(res2)))
+        CPSR.Q = flag
+    case 0x200000:  //SMLAWy/SMULWy
+        //SMULWy no Q
+    case 0x400000:  //SMLALxy
+        //No Q
+    case 0x600000:  //SMULxy
+        //No Q
+    }
+
+    return 3
 }
 
 @(private="file")
@@ -444,6 +488,162 @@ cpu_qaddsub :: proc(opcode: u32) -> u32 {
 }
 
 @(private="file")
+cpu_ldr :: proc(opcode: u32, I: bool) -> u32 {
+    P := i64(utils_bit_get32(opcode, 24))
+    U := utils_bit_get32(opcode, 23)
+    B := utils_bit_get32(opcode, 22)
+    W := true
+    if(bool(P)) {
+        W = utils_bit_get32(opcode, 21)
+    }
+    L := utils_bit_get32(opcode, 20)
+    Rn := Regs((opcode & 0xF0000) >> 16)
+    Rd := Regs((opcode & 0xF000) >> 12)
+    offset: i64
+    address := cpu_reg_get(Rn)
+    logic_carry: bool
+    data: u32
+
+    if(I) {
+        offset = i64(cpu_reg_shift(opcode, &logic_carry)) //Carry not used
+    } else {
+        offset = i64(opcode & 0xFFF)
+    }
+    if(!U) {
+        offset = -offset
+    }
+    PC += 4
+    address = u32(i64(address) + P * offset) //Pre increment
+    if(L) {
+        if(B) { //LDRB
+            data = u32(bus_read8(address))
+        } else { //LDR
+            shift := address & 0x3
+            data = bus_read32(address)
+            if(shift > 0) {
+                data = cpu_ror32(data, shift * 8)
+            }
+            if(Rd == Regs.PC) {
+                CPSR.Thumb = bool(data & 1)
+            }
+        }
+        address = u32(i64(address) + (1 - P) * offset) //Post increment
+        if(W) {
+            if(Rn == Regs.PC) {
+                cpu_reg_set(Rn, address + 4)
+            } else {
+                cpu_reg_set(Rn, address)
+            }
+        }
+        cpu_reg_set(Rd, data)
+    } else {
+        if(B) { //STRB
+            bus_write8(address, u8(cpu_reg_get(Rd)))
+        } else { //STR
+            value := cpu_reg_get(Rd)
+            bus_write32(address, value)
+        }
+        address = u32(i64(address) + (1 - P) * offset) //Post increment
+        if(W) {
+            if(Rn == Regs.PC) {
+                cpu_reg_set(Rn, address + 4)
+            } else {
+                cpu_reg_set(Rn, address)
+            }
+        }
+    }
+    return 3
+}
+
+@(private="file")
+cpu_ldm_stm :: proc(opcode: u32) -> u32 {
+    P := utils_bit_get32(opcode, 24)
+    U := utils_bit_get32(opcode, 23)
+    S := utils_bit_get32(opcode, 22)
+    W := utils_bit_get32(opcode, 21)
+    L := utils_bit_get32(opcode, 20)
+    Rn := Regs((opcode & 0xF0000) >> 16)
+    rlist := u16(opcode & 0xFFFF)
+    cycles: u32 = 2
+    rcount: u32
+    first :u8= 20
+    for i :u8= 0; i < 16; i += 1 {
+        if(utils_bit_get16(rlist, i)) {
+            rcount += 1
+            if(first == 20) {
+                first = i
+            }
+        }
+    }
+    num_regs := rcount << 2 // 4 byte per register
+
+    if(rlist == 0) {
+        rlist = 0x8000
+        first = 15
+        num_regs = 64
+    }
+    move_pc := bool((rlist >> 15) & 1)
+
+    address := cpu_reg_get(Rn)
+    base_addr := address
+
+    mode_switch := S && (!L || !move_pc)
+    old_mode := CPSR.Mode
+    if(mode_switch) {
+        CPSR.Mode = Modes.M_USER
+    }
+
+    if(!U) {
+        P = !P
+        address -= num_regs
+        base_addr -= num_regs
+    } else {
+        base_addr += num_regs
+    }
+
+    PC += 4
+
+    for i :u8= first; i < 16; i += 1 {
+        if(bool(~rlist & (1 << i))) {
+            continue
+        }
+        i := Regs(i)
+        if(P) {
+            address += 4
+        }
+        if(L) {
+            data := bus_read32(address)
+            if(W && (u8(i) == first)) {
+                cpu_reg_set(Rn, base_addr)
+            }
+            if(i == Regs.PC) {
+                CPSR.Thumb = bool(data & 1)
+            }
+            cpu_reg_set(i, data)
+        } else {
+            bus_write32(address, cpu_reg_get(i))
+            if(W && (u8(i) == first)) {
+                cpu_reg_set(Rn, base_addr)
+            }
+        }
+        if(!P) {
+            address += 4
+        }
+        cycles += 1
+    }
+    if(L) {
+        if(move_pc && S) {
+            CPSR |= Flags(0x10)
+            CPSR = Flags(cpu_reg_get(Regs.SPSR))
+        }
+    }
+    if(mode_switch) {
+        CPSR.Mode = old_mode
+    }
+    return cycles
+}
+
+@(private="file")
 cpu_exec_thumb :: proc(opcode: u16) -> u32 {
     cpu_prefetch16()
     id := opcode & 0xF800
@@ -588,9 +788,62 @@ cpu_bl :: proc(opcode: u16) -> u32 {
         cpu_reg_set(Regs.PC, cpu_reg_get(Regs.LR) + imm)
         cpu_reg_set(Regs.LR, (tmp_pc | 1) - 4)
         if(!utils_bit_get16(opcode, 12)) {
-            fmt.println("BLX!")
             CPSR.Thumb = false
         }
         return 3
     }
+}
+
+@(private="file")
+cpu_push_pop :: proc(opcode: u16) -> u32 {
+    R := utils_bit_get16(opcode, 8)
+    L := utils_bit_get16(opcode, 11)
+    imm := u32(opcode & 0x00FF)
+    sp := cpu_reg_get(Regs.SP)
+    cycles :u32= 2
+
+    if(L) { //POP - post-increment
+        for i :u8= 0; i < 8; i += 1 {
+            if(utils_bit_get32(imm, i)) {
+                cpu_reg_set(Regs(i), bus_read32(sp))
+                sp += 4
+                cycles += 1
+            }
+        }
+        if(R || imm == 0) { //POP PC
+            pc := bus_read32(sp)
+            if(imm == 0 && !R) {
+                PC = pc
+                refetch = true
+                sp += 60
+            } else {
+                cpu_reg_set(Regs.PC, utils_bit_clear32(pc, 0))
+            }
+            CPSR.Thumb = bool(pc & 1)
+            sp += 4
+            cycles += 1
+        }
+        cpu_reg_set(Regs.SP, sp)
+    } else { //PUSH - pre-decrement
+        sp -= intrinsics.count_ones(imm) * 4 + (u32(R) * 4)
+        cpu_reg_set(Regs.SP, sp)
+        for i :u8= 0; i < 8; i += 1 {
+            if(utils_bit_get32(imm, i)) {
+                bus_write32(sp, cpu_reg_get(Regs(i)))
+                sp += 4
+                cycles += 1
+            }
+        }
+        if(R || imm == 0) { //PUSH LR
+            if(imm == 0 && !R) {
+                sp -= 64
+                bus_write32(sp, PC)
+                cpu_reg_set(Regs.SP, sp)
+            } else {
+                bus_write32(sp, cpu_reg_get(Regs.LR))
+            }
+            cycles += 1
+        }
+    }
+    return cycles
 }
