@@ -3,6 +3,10 @@ package arm7
 import "core:fmt"
 import "base:intrinsics"
 
+IO_IME :u32: 0x4000208
+IO_IE :u32: 0x4000200
+IO_IF :u32: 0x4000202
+
 Regs :: enum {
     R0 = 0,
     R1 = 1,
@@ -22,10 +26,6 @@ Regs :: enum {
     PC = 15,
     SPSR = 17,
 }
-
-IO_IME :u32: 0x4000208
-IO_IE :u32: 0x4000200
-IO_IF :u32: 0x4000202
 
 Modes :: enum u8 {
     M_USER = 16,
@@ -267,6 +267,10 @@ get_stop :: proc() -> bool {
 
 reg_get :: proc(reg: Regs) -> u32 {
     return cpu_reg_get(reg)
+}
+
+reg_raw :: proc(reg: Regs, mode: Modes) -> u32 {
+    return regs[reg][u16(mode) - 16]
 }
 
 get_cpsr :: proc() -> Flags {
