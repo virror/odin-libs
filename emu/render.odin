@@ -54,7 +54,7 @@ vertex_buf: ^sdl.GPUBuffer
 @(private="file")
 index_buf: ^sdl.GPUBuffer
 @(private="file")
-textures: [UI_SPRITE_COUNT + 1]sdl.GPUTextureSamplerBinding
+textures: [UI_SPRITE_COUNT + 3]sdl.GPUTextureSamplerBinding
 @(private="file")
 texture_id: u32
 @(private="file")
@@ -231,7 +231,6 @@ texture_from_sprite :: proc(data: []u8) -> (u32, int, int) {
     defer png.destroy(image)
 
     tex := texture_create(u32(image.width), u32(image.height), &image.pixels.buf[0], 4)
-    texture_id += 1
     return tex, image.width, image.height
 }
 
@@ -272,12 +271,15 @@ texture_create :: proc(w: u32, h: u32, data: rawptr, size: u32) -> u32 {
     }
     sdl.ReleaseGPUTransferBuffer(gpu, trans_buf)
     textures[texture_id].sampler = sdl.CreateGPUSampler(gpu, {})
-    return texture_id
+    tmp_id := texture_id
+    texture_id += 1
+    return tmp_id
 }
 
 texture_destroy :: proc(texture: u32) {
     sdl.ReleaseGPUSampler(gpu, textures[texture].sampler)
     sdl.ReleaseGPUTexture(gpu, textures[texture].texture)
+    texture_id -= 1
 }
 
 render_pre :: proc() {
