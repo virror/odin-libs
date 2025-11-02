@@ -479,44 +479,44 @@ cpu_mulh :: proc(opcode: u32) -> u32 {
     y := utils_bit_get32(opcode, 6)
     x := utils_bit_get32(opcode, 5)
     Rm := Regs(opcode & 0xF)
-    HalfRm: i32
-    //res: u32
+    HalfRm: i16
     if(x) {
-        HalfRm = i32(cpu_reg_get(Rm) >> 16)
+        HalfRm = i16(cpu_reg_get(Rm) >> 16)
     } else {
-        HalfRm = i32(cpu_reg_get(Rm) & 0xFFFF)
+        HalfRm = i16(cpu_reg_get(Rm) & 0xFFFF)
     }
-    HalfRs: i32
+    HalfRs: i16
     if(y) {
-        HalfRs = i32(cpu_reg_get(Rs) >> 16)
+        HalfRs = i16(cpu_reg_get(Rs) >> 16)
     } else {
-        HalfRs = i32(cpu_reg_get(Rs) & 0xFFFF)
+        HalfRs = i16(cpu_reg_get(Rs) & 0xFFFF)
     }
     PC += 4
 
     switch(Op) {
     case 0x000000:  //SMLAxy
-        mul_res := u32(u16(i16(HalfRm) * i16(HalfRs)))
-        //res = u32(i32(mul_res) + i32(cpu_reg_get(Rn)))
-        res2, flag := intrinsics.overflow_add(i32(mul_res), i32(cpu_reg_get(Rn)))
-
-        fmt.println(i16(HalfRm))
-        fmt.println(i16(HalfRs))
-        fmt.println(mul_res)
-        fmt.println(i32(cpu_reg_get(Rn)))
-        fmt.println(u32(u16(res2)))
-        fmt.println(flag)
-
-        cpu_reg_set(Rd, u32(u16(res2)))
+        mul_res := u32(HalfRm) * u32(HalfRs)
+        res, flag := intrinsics.overflow_add(i32(mul_res), i32(cpu_reg_get(Rn)))
+        cpu_reg_set(Rd, u32(res))
         CPSR.Q = flag
-    case 0x200000:  //SMLAWy/SMULWy
-        //SMULWy no Q
+    case 0x200000:
+        if(x) {     //SMULWy
+            res := u32(i32(cpu_reg_get(Rm)) * i32(HalfRs) >> 16)
+            cpu_reg_set(Rd, res)
+        } else {    //SMLAW
+            mul_res := i32(cpu_reg_get(Rm)) * i32(HalfRs)
+            res, flag := intrinsics.overflow_add(mul_res >> 16, i32(cpu_reg_get(Rn)))
+            cpu_reg_set(Rd, u32(res))
+            CPSR.Q = flag
+        }
     case 0x400000:  //SMLALxy
-        //No Q
+        RdHiLo := (i64(cpu_reg_get(Rd)) << 32) | i64(cpu_reg_get(Rn))
+        RdHiLo += i64(HalfRm) * i64(HalfRs)
+        cpu_reg_set(Rd, u32(RdHiLo >> 32))
+        cpu_reg_set(Rn, u32(RdHiLo))
     case 0x600000:  //SMULxy
-        //No Q
+        cpu_reg_set(Rd, u32(HalfRm) * u32(HalfRs))
     }
-
     return 3
 }
 
