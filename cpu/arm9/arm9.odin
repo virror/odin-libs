@@ -3,10 +3,6 @@ package arm9
 import "core:fmt"
 import "base:intrinsics"
 
-IO_IME :u32: 0x4000208
-IO_IE :u32: 0x4000210
-IO_IF :u32: 0x4000214
-
 Regs :: enum {
     R0 = 0,
     R1 = 1,
@@ -58,6 +54,7 @@ bus_write16: proc(addr: u32, value: u16)
 bus_write32: proc(addr: u32, value: u32)
 bus_get16: proc(addr: u32) -> u16
 bus_get32: proc(addr: u32) -> u32
+cpu_exec_irq: proc()
 
 @(private="file")
 halt := false
@@ -198,27 +195,21 @@ cpu_reg_raw :: proc(reg: Regs, mode: Modes) -> u32 {
     }
 }
 
-@(private="file")
-cpu_exec_irq :: proc() {
-    //Handle interrupts
-    if(utils_bit_get32(bus_get32(IO_IME), 0) && !CPSR.IRQ) { //IEs enabled
-        if(bus_get32(IO_IE) & bus_get32(IO_IF) > 0) { //IE triggered
-            regs[17][2] = u32(CPSR)     //Store cpsr in IRQ bank
-            CPSR.Mode = Modes.M_IRQ
-            if(CPSR.Thumb) {
-                cpu_reg_set(Regs.LR, PC) //Store PC
-            } else {
-                cpu_reg_set(Regs.LR, PC - 4) //Store PC
-            }
-            PC = 0x18 //Go to interurupt handler
-            cpu_refetch32()
-            CPSR.Thumb = false
-            CPSR.IRQ = true
-
-            halt = false
-            stop = false
-        }
+exec_irq :: proc(pc: u32) {
+    regs[17][2] = u32(CPSR)     //Store cpsr in IRQ bank
+    CPSR.Mode = Modes.M_IRQ
+    if(CPSR.Thumb) {
+        cpu_reg_set(Regs.LR, PC) //Store PC
+    } else {
+        cpu_reg_set(Regs.LR, PC - 4) //Store PC
     }
+    PC = pc //Go to interurupt handler
+    cpu_refetch32()
+    CPSR.Thumb = false
+    CPSR.IRQ = true
+
+    halt = false
+    stop = false
 }
 
 reset :: proc(pc: u32) {
