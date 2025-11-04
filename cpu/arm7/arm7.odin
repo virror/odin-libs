@@ -4,8 +4,6 @@ import "core:fmt"
 import "base:intrinsics"
 
 IO_IME :u32: 0x4000208
-IO_IE :u32: 0x4000200
-IO_IF :u32: 0x4000202
 
 Regs :: enum {
     R0 = 0,
@@ -58,6 +56,10 @@ bus_write16: proc(addr: u32, value: u16)
 bus_write32: proc(addr: u32, value: u32)
 bus_get16: proc(addr: u32) -> u16
 bus_get32: proc(addr: u32) -> u32
+@(private="file")
+IO_IE: u32
+@(private="file")
+IO_IF: u32
 
 @(private="file")
 halt := false
@@ -198,8 +200,8 @@ cpu_reg_raw :: proc(reg: Regs, mode: Modes) -> u32 {
 @(private="file")
 cpu_exec_irq :: proc() {
     //Handle interrupts
-    if(utils_bit_get16(bus_get16(IO_IME), 0) && !CPSR.IRQ) { //IEs enabled
-        if(bus_get16(IO_IE) & bus_get16(IO_IF) > 0) { //IE triggered
+    if(utils_bit_get32(bus_get32(IO_IME), 0) && !CPSR.IRQ) { //IEs enabled
+        if(bus_get32(IO_IE) & bus_get32(IO_IF) > 0) { //IE triggered
             regs[17][2] = u32(CPSR)     //Store cpsr in IRQ bank
             CPSR.Mode = Modes.M_IRQ
             if(CPSR.Thumb) {
@@ -218,7 +220,7 @@ cpu_exec_irq :: proc() {
     }
 }
 
-reset :: proc(pc: u32) {
+reset :: proc(pc: u32, ioie: u32, ioif: u32) {
     halt = false
     stop = false
     regs = {}
@@ -226,6 +228,8 @@ reset :: proc(pc: u32) {
     PC = pc
     CPSR = Flags(0)
     refetch = false
+    IO_IE = ioie
+    IO_IF = ioif
     cpu_init()
 }
 
@@ -414,7 +418,7 @@ cpu_exec_arm :: proc(opcode: u32) -> u32 {
     case 0x8000000: //LDM, STM (PUSH, POP)
         retval = cpu_ldm_stm(opcode)
         break
-    case 0xA000000: //B, BL, BLX
+    case 0xA000000: //B, BL
         retval = cpu_b_bl(opcode)
         break
     case 0xC000000: //LDC, STC
@@ -1078,18 +1082,6 @@ cpu_b_bl :: proc(opcode: u32) -> u32 {
     } else { //B
         cpu_reg_set(Regs.PC, u32(i32(PC) + i32(offset)))
     }
-    return 3
-}
-
-@(private="file")
-cpu_blx :: proc(opcode: u32) -> u32 {
-    offset := (opcode & 0xFFFFFF) << 2
-    offset = utils_sign_extend32(offset, 26)
-    H := u32(utils_bit_get32(opcode, 24))
-
-    cpu_reg_set(Regs.LR, PC - 4)
-    cpu_reg_set(Regs.PC, u32(i32(PC) + i32(offset)) + H * 2)
-    CPSR.Thumb = true
     return 3
 }
 

@@ -201,8 +201,8 @@ cpu_reg_raw :: proc(reg: Regs, mode: Modes) -> u32 {
 @(private="file")
 cpu_exec_irq :: proc() {
     //Handle interrupts
-    if(utils_bit_get16(bus_get16(IO_IME), 0) && !CPSR.IRQ) { //IEs enabled
-        if(bus_get16(IO_IE) & bus_get16(IO_IF) > 0) { //IE triggered
+    if(utils_bit_get32(bus_get32(IO_IME), 0) && !CPSR.IRQ) { //IEs enabled
+        if(bus_get32(IO_IE) & bus_get32(IO_IF) > 0) { //IE triggered
             regs[17][2] = u32(CPSR)     //Store cpsr in IRQ bank
             CPSR.Mode = Modes.M_IRQ
             if(CPSR.Thumb) {
