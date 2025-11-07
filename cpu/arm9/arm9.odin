@@ -606,9 +606,29 @@ cpu_hw_transfer :: proc(opcode: u32) -> u32 {
                 }
             }
         case 0x40:
-            fmt.println("LDRD")
+            data1 := bus_read32(address)
+            data2 := bus_read32(address + 4)
+            address = u32(i64(address) + (1 - i64(P)) * offset) //Post increment
+            if(W) {
+                cpu_reg_set(Rn, address)
+            }
+            cpu_reg_set(Rd, data1)
+            cpu_reg_set(Rd + Regs(1), data2)
+            cycles = 3
         case 0x60:
-            fmt.println("STRD")
+            data1 := cpu_reg_get(Rd)
+            data2 := cpu_reg_get(Rd + Regs(1))
+            bus_write32(address, data1)
+            bus_write32(address + 4, data2)
+            address = u32(i64(address) + (1 - i64(P)) * offset) //Post increment
+            if(W) {
+                if(Rn == Regs.PC) {
+                    cpu_reg_set(Rn, address + 4)
+                } else {
+                    cpu_reg_set(Rn, address)
+                }
+            }
+            cycles = 2
         }
     }
     return cycles
