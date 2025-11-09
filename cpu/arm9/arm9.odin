@@ -788,21 +788,21 @@ cpu_ldm_stm :: proc(opcode: u32) -> u32 {
     rlist := u16(opcode & 0xFFFF)
     cycles: u32 = 2
     rcount: u32
-    first :u8= 20
+    last: Regs
     for i :u8= 0; i < 16; i += 1 {
         if(utils_bit_get16(rlist, i)) {
             rcount += 1
-            if(first == 20) {
-                first = i
-            }
         }
     }
     num_regs := rcount << 2 // 4 byte per register
 
     if(rlist == 0) {
-        rlist = 0x8000
-        first = 15
-        num_regs = 64
+        data := cpu_reg_get(Rn)
+        if(U) {
+            cpu_reg_set(Rn, data + 0x40)
+        } else {
+            cpu_reg_set(Rn, data - 0x40)
+        }
     }
     move_pc := bool((rlist >> 15) & 1)
 
@@ -825,42 +825,47 @@ cpu_ldm_stm :: proc(opcode: u32) -> u32 {
 
     PC += 4
 
-    for i :u8= first; i < 16; i += 1 {
+    for i :u8= 0; i < 16; i += 1 {
         if(bool(~rlist & (1 << i))) {
             continue
         }
         i := Regs(i)
+        last = i
         if(P) {
             address += 4
         }
         if(L) {
             data := bus_read32(address)
-            if(W && (u8(i) == first)) {
-                cpu_reg_set(Rn, base_addr)
-            }
             if(i == Regs.PC) {
                 CPSR.Thumb = bool(data & 1)
             }
             cpu_reg_set(i, data)
         } else {
-            bus_write32(address, cpu_reg_get(i))
-            if(W && (u8(i) == first)) {
-                cpu_reg_set(Rn, base_addr)
-            }
+            data := cpu_reg_get(i)
+            bus_write32(address, data)
         }
         if(!P) {
             address += 4
         }
         cycles += 1
     }
+    if(mode_switch) {
+        CPSR.Mode = old_mode
+    }
+    if(W && u16(opcode & 0xFFFF) != 0) {
+        if(L) {
+            if((1 << u16(Rn)) == rlist || Rn != last) {
+                cpu_reg_set(Rn, base_addr)
+            }
+        } else {
+            cpu_reg_set(Rn, base_addr)
+        }
+    }
     if(L) {
         if(move_pc && S) {
             CPSR |= Flags(0x10)
             CPSR = Flags(cpu_reg_get(Regs.SPSR))
         }
-    }
-    if(mode_switch) {
-        CPSR.Mode = old_mode
     }
     return cycles
 }
