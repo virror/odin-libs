@@ -456,7 +456,7 @@ cpu_bx :: proc(opcode: u32) -> u32 {
         cpu_reg_set(Regs.PC, value)
     }
     if(op == 3) { //BLX
-        cpu_reg_set(Regs.LR, pc + 4)
+        cpu_reg_set(Regs.LR, pc - 8)
     }
     return 3
 }
@@ -1259,7 +1259,7 @@ cpu_unknown_irq :: proc() {
     cpsr := CPSR
     CPSR.Mode = Modes.M_UNDEFINED
     cpu_reg_set(Regs.LR, PC - 4)
-    cpu_reg_set(Regs.PC, 0x04)
+    cpu_reg_set(Regs.PC, 0xFFFF0004)
     cpu_reg_set(Regs.SPSR, u32(cpsr))
     CPSR.Thumb = false  //ARM mode
     CPSR.IRQ = true     //Disable interrupts
@@ -1284,7 +1284,7 @@ cpu_swi :: proc() -> u32 {
     CPSR.Thumb = false  //ARM mode
     CPSR.IRQ = true     //Disable interrupts
     cpu_reg_set(Regs.LR, PC - 4)
-    cpu_reg_set(Regs.PC, 0x08)
+    cpu_reg_set(Regs.PC, 0xFFFF0008)
     return 3
 }
 
@@ -1412,7 +1412,7 @@ cpu_hi_reg :: proc(opcode: u16) -> u32 {
             cpu_reg_set(Regs.PC, value)
         }
         if(bool(H1)) { //BLX
-            cpu_reg_set(Regs.LR, pc + 4)
+            cpu_reg_set(Regs.LR, pc - 4)
         }
         cycles += 2
         break
